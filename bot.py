@@ -49,6 +49,18 @@ def extract_poll_id_from_message(content: str) -> int:
     return int(poll_id)
 
 
+async def get_message_from_poll_id(poll_id: int):
+    for channel in bot.get_all_channels():
+        if not isinstance(channel, discord.TextChannel):
+            continue
+        async for message in channel.history(limit=100):
+            if message.author == bot.user:
+                if "Poll ID: " in message.content:
+                    if poll_id == extract_poll_id_from_message(message.content):
+                        return message
+    return None
+
+
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}!")
@@ -64,16 +76,21 @@ async def on_ready():
 async def create_poll(
     interaction: discord.Interaction, question: str, options: str
 ):
-    options_list = [opt.strip() for opt in options.split(",")]
+    options_list = [
+        opt.strip() for opt in options.split(",") if opt.strip() != ""
+    ]
     if len(options_list) < 2:
         await interaction.response.send_message(
             "You need at least two options to create a poll.", ephemeral=True
         )
         return
 
+    # Give the bot more time to respond to the interaction
+    await interaction.response.defer()
+
     poll_id = add_poll(question, options_list)
     view = PollView(poll_id, interaction.user.id)  # type: ignore
-    await interaction.response.send_message(f"**{question}**", view=view)
+    await interaction.followup.send(f"**{question}**", view=view)
 
 
 @bot.tree.command(name="deletepoll")  # type: ignore
@@ -89,7 +106,9 @@ async def delete_poll(
         )
         return
 
-    modal = ConfirmDeleteModal(poll_id, interaction.message.id)  # type: ignore
+    message = await get_message_from_poll_id(poll_id)
+
+    modal = ConfirmDeleteModal(poll_id, message)  # type: ignore
 
     await interaction.response.send_modal(modal)
 
