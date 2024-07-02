@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import dotenv
 import os
+from views.delete import ConfirmDeleteModal
 from views.poll import PollView
 from helpers.db_funcs import add_poll, init_db, load_poll_data
 
@@ -31,7 +32,7 @@ async def load_previous_polls(bot: commands.Bot):
                 if "Poll ID: " in message.content:
                     poll_id = extract_poll_id_from_message(message.content)
                     poll_data = load_poll_data(poll_id)
-                    print(f"Loaded poll {poll_data}")
+                    # print(f"Loaded poll {poll_data}")
                     if poll_data:
                         view = PollView(poll_data[0], message.author.id)
                         await message.edit(
@@ -44,7 +45,7 @@ def extract_poll_id_from_message(content: str) -> int:
     prefix = "Poll ID: "
     start = content.find(prefix) + len(prefix)
     poll_id = content[start:]
-    print(f"Extracted Poll ID {poll_id}")
+    # print(f"Extracted Poll ID {poll_id}")
     return int(poll_id)
 
 
@@ -73,6 +74,33 @@ async def create_poll(
     poll_id = add_poll(question, options_list)
     view = PollView(poll_id, interaction.user.id)  # type: ignore
     await interaction.response.send_message(f"**{question}**", view=view)
+
+
+@bot.tree.command(name="deletepoll")  # type: ignore
+async def delete_poll(
+    interaction: discord.Interaction,
+    poll_id: int,
+):
+    is_admin = interaction.user.guild_permissions.administrator  # type: ignore
+
+    if not is_admin:
+        await interaction.response.send_message(
+            "You must be an administrator to delete a poll.", ephemeral=True
+        )
+        return
+
+    modal = ConfirmDeleteModal(poll_id, interaction.message.id)  # type: ignore
+
+    await interaction.response.send_modal(modal)
+
+
+# Error handling
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        return  # Ignore commands that are not found
+    else:
+        raise error  # other errors to be handled by the default handler
 
 
 bot.run(BOT_TOKEN)

@@ -3,12 +3,18 @@ from discord.ui import Modal, TextInput
 
 
 class VoteWarningModal(Modal):
+    MAX_MESSAGE_CHARACTERS = 45
 
     def __init__(self, option: str, poll_id: int):
         super().__init__(title="Vote Warning")
+
+        self.label = f"You have already voted for: {option}"
+        if len(self.label) > self.MAX_MESSAGE_CHARACTERS:
+            self.label = self.label[: self.MAX_MESSAGE_CHARACTERS - 3] + "..."
+
         self.add_item(
             TextInput(
-                label=f"You have already voted for this option: {option}.",
+                label=self.label,
                 default="Please choose a different option.",
                 required=False,
             )

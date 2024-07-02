@@ -17,7 +17,7 @@ class PollView(View):
                 label=label,
                 style=discord.ButtonStyle.primary,  # type: ignore
             )
-            button.callback = self.create_callback(option_id)  # type: ignore
+            button.callback = self.create_callback(option_id, option)  # type: ignore
             self.add_item(button)  # type: ignore
 
     def refresh_data(self):
@@ -26,13 +26,13 @@ class PollView(View):
         self.options = options
         self.votes = {option_id: votes for option_id, _, votes in options}
 
-    def create_callback(self, option_id: int):
+    def create_callback(self, option_id: int, option: str):
         async def callback(interaction: discord.Interaction):
             user_id = interaction.user.id
 
             vote_was_recorded = record_vote(self.poll_id, user_id, option_id)
             if not vote_was_recorded:
-                modal = VoteWarningModal(self.options[option_id], self.poll_id)
+                modal = VoteWarningModal(option, self.poll_id)
                 await interaction.response.send_modal(modal)
                 return
             self.refresh_data()
