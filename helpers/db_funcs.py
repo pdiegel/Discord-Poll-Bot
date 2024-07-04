@@ -2,7 +2,7 @@ import sqlite3
 from constants import DATABASE
 
 
-def init_db():
+def init_db() -> None:
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute(
@@ -23,7 +23,10 @@ user_id INTEGER, option_id INTEGER)"""
     conn.close()
 
 
-def add_poll(question: str, options: list[str]) -> int | None:
+def add_poll(
+    question: str,
+    options: list[str],
+) -> int | None:
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute("INSERT INTO polls (question) VALUES (?)", (question,))
@@ -38,7 +41,7 @@ def add_poll(question: str, options: list[str]) -> int | None:
     return poll_id
 
 
-def get_poll(poll_id: int):
+def get_poll(poll_id: int) -> tuple[str, list[tuple[int, str, int]]] | None:
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute("SELECT question FROM polls WHERE poll_id = ?", (poll_id,))
@@ -52,7 +55,11 @@ def get_poll(poll_id: int):
     return question, options
 
 
-def record_vote(poll_id: int, user_id: int, option_id: int) -> bool:
+def record_vote(
+    poll_id: int,
+    user_id: int,
+    option_id: int,
+) -> bool:
     """Record a vote for a user on a poll option.
 
     Args:
@@ -88,7 +95,7 @@ option_id = ?",
     return vote_was_recorded
 
 
-def delete_poll(poll_id: int):
+def delete_poll(poll_id: int) -> None:
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute("DELETE FROM votes WHERE poll_id = ?", (poll_id,))
@@ -98,7 +105,10 @@ def delete_poll(poll_id: int):
     conn.close()
 
 
-def get_user_votes(poll_id: int, user_id: int):
+def get_user_votes(
+    poll_id: int,
+    user_id: int,
+) -> list[int]:
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute(
@@ -110,7 +120,9 @@ def get_user_votes(poll_id: int, user_id: int):
     return [vote[0] for vote in votes]
 
 
-def load_poll_data(poll_id: int):  # type: ignore
+def load_poll_data(
+    poll_id: int,
+) -> tuple[int, list[dict[str, str | int]]] | None:
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute(

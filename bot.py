@@ -22,7 +22,7 @@ init_db()
 # Find and load previous polls that contain a Poll ID.
 # This is necessary to ensure that the bot can recover from a restart.
 # Search through the previous 100 messages in each channel the bot can see.
-async def load_previous_polls(bot: commands.Bot):
+async def load_previous_polls(bot: commands.Bot) -> None:
     for channel in bot.get_all_channels():
         if not isinstance(channel, discord.TextChannel):
             continue
@@ -30,7 +30,7 @@ async def load_previous_polls(bot: commands.Bot):
             if message.author == bot.user:
                 # Check if the message content contains the Poll ID
                 if "Poll ID: " in message.content:
-                    poll_id = extract_poll_id_from_message(message.content)
+                    poll_id = get_poll_id_from_message(message.content)
                     poll_data = load_poll_data(poll_id)
                     # print(f"Loaded poll {poll_data}")
                     if poll_data:
@@ -40,7 +40,7 @@ async def load_previous_polls(bot: commands.Bot):
                         )
 
 
-def extract_poll_id_from_message(content: str) -> int:
+def get_poll_id_from_message(content: str) -> int:
     # Extract the Poll ID from discord message content
     prefix = "Poll ID: "
     start = content.find(prefix) + len(prefix)
@@ -49,20 +49,20 @@ def extract_poll_id_from_message(content: str) -> int:
     return int(poll_id)
 
 
-async def get_message_from_poll_id(poll_id: int):
+async def get_message_from_poll_id(poll_id: int) -> discord.Message | None:
     for channel in bot.get_all_channels():
         if not isinstance(channel, discord.TextChannel):
             continue
         async for message in channel.history(limit=100):
             if message.author == bot.user:
                 if "Poll ID: " in message.content:
-                    if poll_id == extract_poll_id_from_message(message.content):
+                    if poll_id == get_poll_id_from_message(message.content):
                         return message
     return None
 
 
 @bot.event
-async def on_ready():
+async def on_ready() -> None:
     print(f"Logged in as {bot.user}!")
     try:
         await bot.tree.sync()
@@ -75,7 +75,7 @@ async def on_ready():
 @bot.tree.command(name="createpoll")  # type: ignore
 async def create_poll(
     interaction: discord.Interaction, question: str, options: str
-):
+) -> None:
     options_list = [
         opt.strip() for opt in options.split(",") if opt.strip() != ""
     ]
@@ -97,7 +97,7 @@ async def create_poll(
 async def delete_poll(
     interaction: discord.Interaction,
     poll_id: int,
-):
+) -> None:
     is_admin = interaction.user.guild_permissions.administrator  # type: ignore
 
     if not is_admin:
@@ -115,7 +115,7 @@ async def delete_poll(
 
 # Error handling
 @bot.event
-async def on_command_error(ctx, error):
+async def on_command_error(ctx, error) -> None:  # type: ignore
     if isinstance(error, commands.CommandNotFound):
         return  # Ignore commands that are not found
     else:

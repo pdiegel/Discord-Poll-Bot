@@ -22,7 +22,7 @@ class VoteWarningModal(Modal):
         self.option = option
         self.poll_id = poll_id
 
-    async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message(
             f"Warning: Your vote for '{self.option}' in Poll ID \
 '{self.poll_id}' has already been recorded.",

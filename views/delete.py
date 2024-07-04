@@ -10,7 +10,7 @@ class ConfirmDeleteModal(Modal):
         self.poll_message = message
         self.add_item(TextInput(label="Type 'DELETE' to confirm"))
 
-    async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(self, interaction: discord.Interaction) -> None:
         if self.children[0].value.upper().strip() == "DELETE":  # type: ignore
             await self.poll_message.delete()
             delete_poll(self.poll_id)
