@@ -19,6 +19,10 @@ option TEXT, votes INTEGER)"""
                  (vote_id INTEGER PRIMARY KEY, poll_id INTEGER, \
 user_id INTEGER, option_id INTEGER)"""
     )
+    c.execute(
+        """CREATE TABLE IF NOT EXISTS poll_servers
+                 (poll_id INTEGER PRIMARY KEY, server_id INTEGER)"""
+    )
     conn.commit()
     conn.close()
 
@@ -26,11 +30,18 @@ user_id INTEGER, option_id INTEGER)"""
 def add_poll(
     question: str,
     options: list[str],
+    server_id: int,
 ) -> int | None:
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute("INSERT INTO polls (question) VALUES (?)", (question,))
+
     poll_id = c.lastrowid
+    c.execute(
+        "INSERT INTO poll_servers (poll_id, server_id) VALUES (?, ?)",
+        (poll_id, server_id),
+    )
+
     for option in options:
         c.execute(
             "INSERT INTO options (poll_id, option, votes) VALUES (?, ?, 0)",
@@ -95,9 +106,20 @@ option_id = ?",
     return vote_was_recorded
 
 
-def delete_poll(poll_id: int) -> None:
+def delete_poll(poll_id: int, server_id: int) -> None:
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
+
+    # If the poll isn't in the server, do nothing
+    c.execute(
+        "SELECT * FROM poll_servers WHERE poll_id = ? AND server_id = ?",
+        (poll_id, server_id),
+    )
+    if c.fetchone() is None:
+        conn.close()
+        raise ValueError(f"Poll ID {poll_id} not found in server")
+
+    c.execute("DELETE FROM poll_servers WHERE poll_id = ?", (poll_id,))
     c.execute("DELETE FROM votes WHERE poll_id = ?", (poll_id,))
     c.execute("DELETE FROM options WHERE poll_id = ?", (poll_id,))
     c.execute("DELETE FROM polls WHERE poll_id = ?", (poll_id,))
