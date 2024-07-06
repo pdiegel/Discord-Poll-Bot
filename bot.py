@@ -5,6 +5,7 @@ import os
 from views.delete import ConfirmDeleteModal
 from views.poll import PollView
 from helpers.db_funcs import add_poll, init_db, load_poll_data
+from helpers.discord_funcs import get_server_id
 
 dotenv.load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
@@ -88,7 +89,8 @@ async def create_poll(
     # Give the bot more time to respond to the interaction
     await interaction.response.defer()
 
-    poll_id = add_poll(question, options_list)
+    discord_server_id = get_server_id(interaction)
+    poll_id = add_poll(question, options_list, discord_server_id)
     view = PollView(poll_id, interaction.user.id)  # type: ignore
     await interaction.followup.send(f"**{question}**", view=view)
 
