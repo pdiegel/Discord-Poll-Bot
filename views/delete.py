@@ -17,16 +17,13 @@ class ConfirmDeleteModal(Modal):
             try:
                 discord_server_id = get_server_id(interaction)
             except ValueError:
-                discord_server_id = None
-
-            if discord_server_id is None:
                 await interaction.response.send_message(
                     "This command must be used in a server.", ephemeral=True
                 )
                 return
 
             try:
-                delete_poll(self.poll_id, discord_server_id)
+                await delete_poll(self.poll_id, discord_server_id)
             except ValueError:
                 await interaction.response.send_message(
                     "Unable to Delete Poll: Poll not found.", ephemeral=True

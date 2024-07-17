@@ -1,191 +1,188 @@
-import sqlite3
-from constants import DATABASE
+import asyncpg  # type: ignore
+from asyncpg import Record  # type: ignore
+from constants import DATABASE_URL
+from typing import Any, List, Tuple, Dict, Optional
 
 
-def init_db() -> None:
-    conn = sqlite3.connect(DATABASE)
-    c = conn.cursor()
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS polls
-                 (poll_id INTEGER PRIMARY KEY, question TEXT)"""
-    )
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS options
-                 (option_id INTEGER PRIMARY KEY, poll_id INTEGER, \
-option TEXT, votes INTEGER)"""
-    )
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS votes
-                 (vote_id INTEGER PRIMARY KEY, poll_id INTEGER, \
-user_id INTEGER, option_id INTEGER)"""
-    )
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS poll_servers
-                 (poll_id INTEGER PRIMARY KEY, server_id INTEGER)"""
-    )
-    conn.commit()
-    conn.close()
+async def connect_db() -> asyncpg.Connection:
+    return await asyncpg.connect(DATABASE_URL)  # type: ignore
 
 
-def add_poll(
+async def query_db(
+    query: str,
+    args: Tuple[Any] | Tuple[()] = (),
+    one: bool = False,
+    commit: bool = True,
+    fetch: bool = True,
+) -> Any:
+    conn = await connect_db()
+    try:
+        if fetch:
+            results: List[Any] = await conn.fetch(query, *args)  # type: ignore
+            if one:
+                return results[0] if results else None
+            return results
+        else:
+            await conn.execute(query, *args)  # type: ignore
+    finally:
+        await conn.close()  # type: ignore
+
+
+async def add_poll(
     question: str,
-    options: list[str],
+    options: List[str],
     server_id: int,
-) -> int | None:
-    conn = sqlite3.connect(DATABASE)
-    c = conn.cursor()
-    c.execute("INSERT INTO polls (question) VALUES (?)", (question,))
+) -> Optional[int]:
+    query = "INSERT INTO polls (question) VALUES ($1) RETURNING poll_id"
+    result = await query_db(query, (question,), one=True)
+    poll_id = result["poll_id"] if result else None
 
-    poll_id = c.lastrowid
-    c.execute(
-        "INSERT INTO poll_servers (poll_id, server_id) VALUES (?, ?)",
-        (poll_id, server_id),
+    if poll_id is None:
+        return None
+
+    await query_db(
+        "INSERT INTO poll_servers (poll_id, server_id) VALUES ($1, $2)",
+        (poll_id, server_id),  # type: ignore
+        fetch=False,
     )
 
     for option in options:
-        c.execute(
-            "INSERT INTO options (poll_id, option, votes) VALUES (?, ?, 0)",
-            (poll_id, option),
+        await query_db(
+            "INSERT INTO options (poll_id, option, votes) VALUES ($1, $2, 0)",
+            (poll_id, option),  # type: ignore
+            fetch=False,
         )
-    conn.commit()
-    conn.close()
+
     return poll_id
 
 
-def get_poll(poll_id: int) -> tuple[str, list[tuple[int, str, int]]] | None:
-    conn = sqlite3.connect(DATABASE)
-    c = conn.cursor()
-    c.execute("SELECT question FROM polls WHERE poll_id = ?", (poll_id,))
-    question = c.fetchone()[0]
-    c.execute(
-        "SELECT option_id, option, votes FROM options WHERE poll_id = ?",
+async def get_poll(
+    poll_id: int,
+) -> Optional[Tuple[str, List[Tuple[int, str, int]]]]:
+    poll = await query_db(
+        "SELECT question FROM polls WHERE poll_id = $1",
         (poll_id,),
+        one=True,
+        commit=False,
     )
-    options = c.fetchall()
-    conn.close()
+    if poll is None:
+        return None
+
+    question = poll["question"]
+    options = await query_db(
+        "SELECT option_id, option, votes FROM options WHERE poll_id = $1",
+        (poll_id,),
+        commit=False,
+    )
+    options = sorted(options, key=lambda x: x["option_id"])
     return question, options
 
 
-def record_vote(
+async def record_vote(
     poll_id: int,
     user_id: int,
     option_id: int,
     remove_if_exists: bool = False,
 ) -> None:
-    """Record a vote for a user on a poll option.
-
-    Args:
-        poll_id (int): The ID of the poll.
-        user_id (int): The ID of the user.
-        option_id (int): The ID of the option.
-        remove_if_exists (bool): If True, remove the user's vote if it exists.
-    """
-    conn = sqlite3.connect(DATABASE)
-    c = conn.cursor()
-    c.execute(
-        "SELECT * FROM votes WHERE poll_id = ? AND user_id = ? AND \
-option_id = ?",
-        (poll_id, user_id, option_id),
+    user_has_voted = (
+        await query_db(
+            "SELECT * FROM votes WHERE poll_id = $1 AND user_id = $2 \
+AND option_id = $3",
+            (poll_id, user_id, option_id),  # type: ignore
+            one=True,
+            commit=False,
+        )
+        is not None
     )
-
-    user_has_voted = c.fetchone() is not None
 
     if user_has_voted and remove_if_exists:
-        c.execute(
-            "DELETE FROM votes WHERE poll_id = ? AND user_id = ? AND \
-option_id = ?",
-            (poll_id, user_id, option_id),
+        await query_db(
+            "DELETE FROM votes WHERE poll_id = $1 AND user_id = $2 \
+AND option_id = $3",
+            (poll_id, user_id, option_id),  # type: ignore
+            fetch=False,
         )
-        c.execute(
-            "UPDATE options SET votes = votes - 1 WHERE option_id = ?",
+
+        await query_db(
+            "UPDATE options SET votes = votes - 1 WHERE option_id = $1",
             (option_id,),
+            fetch=False,
         )
     elif not user_has_voted:
-        c.execute(
-            "INSERT INTO votes (poll_id, user_id, option_id) VALUES (?, ?, ?)",
-            (poll_id, user_id, option_id),
+        await query_db(
+            "INSERT INTO votes (poll_id, user_id, option_id) \
+VALUES ($1, $2, $3)",
+            (poll_id, user_id, option_id),  # type: ignore
+            fetch=False,
         )
-        c.execute(
-            "UPDATE options SET votes = votes + 1 WHERE option_id = ?",
+
+        await query_db(
+            "UPDATE options SET votes = votes + 1 WHERE option_id = $1",
             (option_id,),
+            fetch=False,
         )
 
-    conn.commit()
-    conn.close()
 
-
-def delete_poll(poll_id: int, server_id: int) -> None:
-    conn = sqlite3.connect(DATABASE)
-    c = conn.cursor()
-
-    # If the poll isn't in the server, do nothing
-    c.execute(
-        "SELECT * FROM poll_servers WHERE poll_id = ? AND server_id = ?",
-        (poll_id, server_id),
+async def delete_poll(poll_id: int, server_id: int) -> None:
+    poll = await query_db(
+        "SELECT * FROM poll_servers WHERE poll_id = $1 AND server_id = $2",
+        (poll_id, server_id),  # type: ignore
+        one=True,
+        commit=False,
     )
-    if c.fetchone() is None:
-        conn.close()
+    if poll is None:
         raise ValueError(f"Poll ID {poll_id} not found in server")
 
-    c.execute("DELETE FROM poll_servers WHERE poll_id = ?", (poll_id,))
-    c.execute("DELETE FROM votes WHERE poll_id = ?", (poll_id,))
-    c.execute("DELETE FROM options WHERE poll_id = ?", (poll_id,))
-    c.execute("DELETE FROM polls WHERE poll_id = ?", (poll_id,))
-    conn.commit()
-    conn.close()
-
-
-def get_user_votes(
-    poll_id: int,
-    user_id: int,
-) -> list[int]:
-    conn = sqlite3.connect(DATABASE)
-    c = conn.cursor()
-    c.execute(
-        "SELECT option_id FROM votes WHERE poll_id = ? AND user_id = ?",
-        (poll_id, user_id),
+    await query_db(
+        "DELETE FROM poll_servers WHERE poll_id = $1", (poll_id,), fetch=False
     )
-    votes = c.fetchall()
-    conn.close()
-    return [vote[0] for vote in votes]
+    await query_db(
+        "DELETE FROM votes WHERE poll_id = $1", (poll_id,), fetch=False
+    )
+    await query_db(
+        "DELETE FROM options WHERE poll_id = $1", (poll_id,), fetch=False
+    )
+    await query_db(
+        "DELETE FROM polls WHERE poll_id = $1", (poll_id,), fetch=False
+    )
 
 
-def load_poll_data(
+async def get_user_votes(poll_id: int, user_id: int) -> List[int]:
+    votes = await query_db(
+        "SELECT option_id FROM votes WHERE poll_id = $1 AND user_id = $2",
+        (poll_id, user_id),  # type: ignore
+        commit=False,
+    )
+    return [vote["option_id"] for vote in votes]
+
+
+async def load_poll_data(
     poll_id: int,
-) -> tuple[int, list[dict[str, str | int]]] | None:
-    conn = sqlite3.connect(DATABASE)
-    c = conn.cursor()
-    c.execute(
-        """
-        SELECT poll_id, option, votes
-        FROM optionS
-        WHERE poll_id = $1
-    """,
+) -> Optional[Tuple[int, List[Dict[str, Any]]]]:
+    poll_data = await query_db(
+        "SELECT poll_id, option, votes FROM options WHERE poll_id = $1",
         (poll_id,),
+        commit=False,
     )
-    poll_data = c.fetchall()
-    conn.close()
 
     if poll_data:
         return parse_poll_data(poll_data)
-
     return None
 
 
 def parse_poll_data(
-    poll_data: list[tuple[int, str, int]]
-) -> tuple[int, list[dict[str, str | int]]]:
+    poll_data: List[Record],  # type: ignore
+) -> Tuple[int, List[Dict[str, Any]]]:
+    poll_id: int = poll_data[0]["poll_id"]  # type: ignore
+    options: List[Dict[str, Any]] = []
 
-    poll_id = poll_data[0][0]
-    options: list[dict[str, str | int]] = []
-
-    for poll in poll_data:
-        option = poll[1]
-        votes = poll[2]
+    for poll in poll_data:  # type: ignore
+        option = poll["option"]  # type: ignore
+        votes = poll["votes"]  # type: ignore
         options.append(
             {
                 "option": option,
                 "votes": votes,
             }
         )
-    return poll_id, options
+    return poll_id, options  # type: ignore

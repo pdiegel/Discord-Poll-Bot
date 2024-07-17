@@ -3,6 +3,7 @@ from discord.ui import Button, View
 from helpers.db_funcs import get_poll, record_vote
 from views.delete import ConfirmDeleteModal
 from typing import Any, Awaitable, Callable
+import asyncio
 
 
 class PollView(View):
@@ -14,18 +15,17 @@ class PollView(View):
         super().__init__(timeout=None)
         self.poll_id = poll_id
         self.user_id = user_id
-        self.refresh_data()
-        for option_id, option, _ in self.options:
-            label = option
-            button = Button(  # type: ignore
-                label=label,
-                style=discord.ButtonStyle.primary,  # type: ignore
-            )
-            button.callback = self.create_callback(option_id)  # type: ignore
-            self.add_item(button)  # type: ignore
+        self.buttons_added = False  # To track if buttons have been added
+        asyncio.create_task(self.init_poll_view())
 
-    def refresh_data(self) -> None:
-        poll = get_poll(self.poll_id)
+    async def init_poll_view(self):
+        await self.refresh_data()
+        if not self.buttons_added:
+            self.add_buttons()
+            self.buttons_added = True
+
+    async def refresh_data(self) -> None:
+        poll = await get_poll(self.poll_id)
         if poll is None:
             raise ValueError("Poll not found")
 
@@ -35,18 +35,44 @@ class PollView(View):
         self.options = options
         self.votes = {option_id: votes for option_id, _, votes in options}
 
+    def add_buttons(self) -> None:
+        for option_id, option, _ in self.options:
+            label = option
+            button = Button(  # type: ignore
+                label=label,
+                style=discord.ButtonStyle.primary,
+            )
+            button.callback = self.create_callback(option_id)  # type: ignore
+            self.add_item(button)  # type: ignore
+
     def create_callback(
         self, option_id: int
     ) -> Callable[[discord.Interaction], Awaitable[Any]]:
+
         async def callback(interaction: discord.Interaction) -> None:
             user_id = interaction.user.id
 
-            record_vote(self.poll_id, user_id, option_id, True)
-            self.refresh_data()
-            await interaction.response.edit_message(
-                content=self.format_poll(),
-                view=PollView(self.poll_id, user_id),
-            )
+            try:
+                await interaction.response.defer()
+                await record_vote(self.poll_id, user_id, option_id, True)
+                await self.refresh_data()
+                await interaction.followup.edit_message(
+                    message_id=interaction.message.id,  # type: ignore
+                    content=self.format_poll(),
+                    view=self,
+                )
+            except discord.errors.NotFound:
+                print(f"Interaction {interaction.id} is no longer valid.")
+                await interaction.followup.send(
+                    "Sorry, this interaction is no longer valid.",
+                    ephemeral=True,
+                )
+            except Exception as e:
+                print(f"An error occurred: {e}")
+                await interaction.followup.send(
+                    "An error occurred while processing your vote.",
+                    ephemeral=True,
+                )
 
         return callback
 
@@ -58,7 +84,19 @@ class PollView(View):
             self.poll_id,
             interaction.message.id,  # type: ignore
         )
-        await interaction.response.send_modal(modal)
+        try:
+            await interaction.response.send_modal(modal)
+        except discord.errors.NotFound:
+            print(f"Interaction {interaction.id} is no longer valid.")
+            await interaction.followup.send(
+                "Sorry, this interaction is no longer valid.", ephemeral=True
+            )
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            await interaction.followup.send(
+                "An error occurred while processing your request.",
+                ephemeral=True,
+            )
 
     def format_poll(self) -> str:
         total_votes = self.total_votes
