@@ -2,7 +2,6 @@ import discord
 from discord.ui import Button, View
 from helpers.db_funcs import get_poll, record_vote
 from views.delete import ConfirmDeleteModal
-from views.vote_warning_modal import VoteWarningModal
 from typing import Any, Awaitable, Callable
 
 
@@ -22,10 +21,7 @@ class PollView(View):
                 label=label,
                 style=discord.ButtonStyle.primary,  # type: ignore
             )
-            button.callback = self.create_callback(  # type: ignore
-                option_id,
-                option,
-            )
+            button.callback = self.create_callback(option_id)  # type: ignore
             self.add_item(button)  # type: ignore
 
     def refresh_data(self) -> None:
@@ -40,16 +36,12 @@ class PollView(View):
         self.votes = {option_id: votes for option_id, _, votes in options}
 
     def create_callback(
-        self, option_id: int, option: str
+        self, option_id: int
     ) -> Callable[[discord.Interaction], Awaitable[Any]]:
         async def callback(interaction: discord.Interaction) -> None:
             user_id = interaction.user.id
 
-            vote_was_recorded = record_vote(self.poll_id, user_id, option_id)
-            if not vote_was_recorded:
-                modal = VoteWarningModal(option, self.poll_id)
-                await interaction.response.send_modal(modal)
-                return
+            record_vote(self.poll_id, user_id, option_id, True)
             self.refresh_data()
             await interaction.response.edit_message(
                 content=self.format_poll(),
@@ -72,12 +64,12 @@ class PollView(View):
         total_votes = self.total_votes
         result = f"**{self.question}**\n\nPoll Results:\n"
         for _, option, votes in self.options:
+            plural = "s" if votes != 1 else ""
             percent_of_total_votes = (
                 (votes / total_votes) * 100 if total_votes != 0 else 0
             )
-            result += (
-                f"{option}: {votes} votes - {percent_of_total_votes:.0f}%\n"
-            )
+            result += f"{option}: {votes} vote{plural} - \
+{percent_of_total_votes:.0f}%\n"
         result += f"\nPoll ID: {self.poll_id}"
         return result
 

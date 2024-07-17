@@ -70,17 +70,15 @@ def record_vote(
     poll_id: int,
     user_id: int,
     option_id: int,
-) -> bool:
+    remove_if_exists: bool = False,
+) -> None:
     """Record a vote for a user on a poll option.
 
     Args:
         poll_id (int): The ID of the poll.
         user_id (int): The ID of the user.
         option_id (int): The ID of the option.
-
-    Returns:
-        bool: True if the vote was recorded,
-            False if the user has already voted.
+        remove_if_exists (bool): If True, remove the user's vote if it exists.
     """
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
@@ -89,9 +87,20 @@ def record_vote(
 option_id = ?",
         (poll_id, user_id, option_id),
     )
-    vote_was_recorded = False
-    user_hasnt_voted = c.fetchone() is None
-    if user_hasnt_voted:
+
+    user_has_voted = c.fetchone() is not None
+
+    if user_has_voted and remove_if_exists:
+        c.execute(
+            "DELETE FROM votes WHERE poll_id = ? AND user_id = ? AND \
+option_id = ?",
+            (poll_id, user_id, option_id),
+        )
+        c.execute(
+            "UPDATE options SET votes = votes - 1 WHERE option_id = ?",
+            (option_id,),
+        )
+    elif not user_has_voted:
         c.execute(
             "INSERT INTO votes (poll_id, user_id, option_id) VALUES (?, ?, ?)",
             (poll_id, user_id, option_id),
@@ -100,10 +109,9 @@ option_id = ?",
             "UPDATE options SET votes = votes + 1 WHERE option_id = ?",
             (option_id,),
         )
-        conn.commit()
-        vote_was_recorded = True
+
+    conn.commit()
     conn.close()
-    return vote_was_recorded
 
 
 def delete_poll(poll_id: int, server_id: int) -> None:
