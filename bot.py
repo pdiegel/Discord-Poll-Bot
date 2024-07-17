@@ -1,23 +1,16 @@
 import discord
 from discord.ext import commands
-import dotenv
-import os
+from constants import BOT_TOKEN
 from views.delete import ConfirmDeleteModal
 from views.poll import PollView
-from helpers.db_funcs import add_poll, init_db, load_poll_data
+from helpers.db_funcs import add_poll, load_poll_data, connect_db
 from helpers.discord_funcs import get_server_id
-
-dotenv.load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 
 intents = discord.Intents.default()
 intents.message_content = True  # Ensure the bot can read message content
 
 bot = commands.Bot(command_prefix="/", intents=intents)
-
-
-init_db()
 
 
 # Find and load previous polls that contain a Poll ID.
@@ -32,10 +25,11 @@ async def load_previous_polls(bot: commands.Bot) -> None:
                 # Check if the message content contains the Poll ID
                 if "Poll ID: " in message.content:
                     poll_id = get_poll_id_from_message(message.content)
-                    poll_data = load_poll_data(poll_id)
+                    poll_data = await load_poll_data(poll_id)
                     # print(f"Loaded poll {poll_data}")
                     if poll_data:
                         view = PollView(poll_data[0], message.author.id)
+                        await view.init_poll_view()  # Ensure initialization
                         await message.edit(
                             content=view.format_poll(), view=view
                         )
@@ -66,6 +60,11 @@ async def get_message_from_poll_id(poll_id: int) -> discord.Message | None:
 async def on_ready() -> None:
     print(f"Logged in as {bot.user}!")
     try:
+        await connect_db()
+        print("Connected to database successfully.")
+    except Exception as e:
+        print(f"Failed to connect to database: {e}")
+    try:
         await bot.tree.sync()
         print("Slash commands synced successfully.")
     except Exception as e:
@@ -92,8 +91,9 @@ async def create_poll(
     await interaction.response.defer()
 
     discord_server_id = get_server_id(interaction)
-    poll_id = add_poll(question, options_list, discord_server_id)
-    view = PollView(poll_id, interaction.user.id)  # type: ignore
+    poll_id = await add_poll(question, options_list, discord_server_id)
+    view = PollView(poll_id, interaction.user.id)
+    await view.init_poll_view()  # Ensure initialization completes
     await interaction.followup.send(
         f"**{question}** Poll ID: {poll_id}", view=view
     )
