@@ -70,7 +70,9 @@ async def on_ready() -> None:
         print("Slash commands synced successfully.")
     except Exception as e:
         print(f"Failed to sync slash commands: {e}")
+
     await load_previous_polls(bot)
+    print("Loaded previous polls successfully.")
 
 
 @bot.tree.command(name="createpoll")  # type: ignore
@@ -92,7 +94,9 @@ async def create_poll(
     discord_server_id = get_server_id(interaction)
     poll_id = add_poll(question, options_list, discord_server_id)
     view = PollView(poll_id, interaction.user.id)  # type: ignore
-    await interaction.followup.send(f"**{question}**", view=view)
+    await interaction.followup.send(
+        f"**{question}** Poll ID: {poll_id}", view=view
+    )
 
 
 @bot.tree.command(name="deletepoll")  # type: ignore
