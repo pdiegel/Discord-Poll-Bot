@@ -2,17 +2,23 @@ import asyncpg  # type: ignore
 from asyncpg import Record  # type: ignore
 from constants import DATABASE_URL
 from typing import Any, List, Tuple, Dict, Optional
+import logging
 
 
-async def connect_db() -> asyncpg.Connection:
-    return await asyncpg.connect(DATABASE_URL)  # type: ignore
+async def connect_db() -> asyncpg.Connection | None:
+    try:
+        conn = await asyncpg.connect(DATABASE_URL)  # type: ignore
+        logging.info("Database connection established")
+        return conn  # type: ignore
+    except Exception as e:
+        logging.error(f"Failed to connect to the database: {e}")
+        raise e
 
 
 async def query_db(
     query: str,
     args: Tuple[Any] | Tuple[()] = (),
     one: bool = False,
-    commit: bool = True,
     fetch: bool = True,
 ) -> Any:
     conn = await connect_db()
@@ -20,10 +26,14 @@ async def query_db(
         if fetch:
             results: List[Any] = await conn.fetch(query, *args)  # type: ignore
             if one:
+                logging.debug(f"Query executed: {query} with args: {args}")
                 return results[0] if results else None
             return results
         else:
             await conn.execute(query, *args)  # type: ignore
+            logging.debug(
+                f"Query executed without fetch: {query} with args: {args}"
+            )
     finally:
         await conn.close()  # type: ignore
 
@@ -63,7 +73,6 @@ async def get_poll(
         "SELECT question FROM polls WHERE poll_id = $1",
         (poll_id,),
         one=True,
-        commit=False,
     )
     if poll is None:
         return None
@@ -72,7 +81,6 @@ async def get_poll(
     options = await query_db(
         "SELECT option_id, option, votes FROM options WHERE poll_id = $1",
         (poll_id,),
-        commit=False,
     )
     options = sorted(options, key=lambda x: x["option_id"])
     return question, options
@@ -90,7 +98,6 @@ async def record_vote(
 AND option_id = $3",
             (poll_id, user_id, option_id),  # type: ignore
             one=True,
-            commit=False,
         )
         is not None
     )
@@ -128,7 +135,6 @@ async def delete_poll(poll_id: int, server_id: int) -> None:
         "SELECT * FROM poll_servers WHERE poll_id = $1 AND server_id = $2",
         (poll_id, server_id),  # type: ignore
         one=True,
-        commit=False,
     )
     if poll is None:
         raise ValueError(f"Poll ID {poll_id} not found in server")
@@ -151,7 +157,6 @@ async def get_user_votes(poll_id: int, user_id: int) -> List[int]:
     votes = await query_db(
         "SELECT option_id FROM votes WHERE poll_id = $1 AND user_id = $2",
         (poll_id, user_id),  # type: ignore
-        commit=False,
     )
     return [vote["option_id"] for vote in votes]
 
@@ -162,7 +167,6 @@ async def load_poll_data(
     poll_data = await query_db(
         "SELECT poll_id, option, votes FROM options WHERE poll_id = $1",
         (poll_id,),
-        commit=False,
     )
 
     if poll_data:

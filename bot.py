@@ -5,6 +5,21 @@ from views.delete import ConfirmDeleteModal
 from views.poll import PollView
 from helpers.db_funcs import add_poll, load_poll_data, connect_db
 from helpers.discord_funcs import get_server_id
+import logging
+import os
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+# Heroku includes a 'DYNO' environment variable.
+if "DYNO" in os.environ:
+    import sys
+
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setLevel(logging.INFO)
+    logger.addHandler(stream_handler)
 
 
 intents = discord.Intents.default()
@@ -20,19 +35,31 @@ async def load_previous_polls(bot: commands.Bot) -> None:
     for channel in bot.get_all_channels():
         if not isinstance(channel, discord.TextChannel):
             continue
-        async for message in channel.history(limit=100):
-            if message.author == bot.user:
-                # Check if the message content contains the Poll ID
-                if "Poll ID: " in message.content:
-                    poll_id = get_poll_id_from_message(message.content)
-                    poll_data = await load_poll_data(poll_id)
-                    # print(f"Loaded poll {poll_data}")
-                    if poll_data:
-                        view = PollView(poll_data[0], message.author.id)
-                        await view.init_poll_view()  # Ensure initialization
-                        await message.edit(
-                            content=view.format_poll(), view=view
-                        )
+        try:
+            async for message in channel.history(limit=100):
+                if message.author == bot.user:
+                    # Check if the message content contains the Poll ID
+                    if "Poll ID: " in message.content:
+                        poll_id = get_poll_id_from_message(message.content)
+                        poll_data = await load_poll_data(poll_id)
+                        if poll_data:
+                            logger.info(
+                                f"Loaded poll {poll_id} in channel \
+{channel.name}"
+                            )
+                            view = PollView(poll_data[0], message.author.id)
+                            await view.init_poll_view()  # Ensure initialization
+                            await message.edit(
+                                content=view.format_poll(), view=view
+                            )
+        except discord.Forbidden:
+            logging.error(
+                f"Permission error while accessing channel {channel.name}"
+            )
+        except Exception as e:
+            logging.error(
+                f"Error loading previous polls in channel {channel.name}: {e}"
+            )
 
 
 def get_poll_id_from_message(content: str) -> int:
@@ -40,7 +67,7 @@ def get_poll_id_from_message(content: str) -> int:
     prefix = "Poll ID: "
     start = content.find(prefix) + len(prefix)
     poll_id = content[start:]
-    # print(f"Extracted Poll ID {poll_id}")
+    logging.debug(f"Extracted Poll ID {poll_id}")
     return int(poll_id)
 
 
@@ -52,26 +79,30 @@ async def get_message_from_poll_id(poll_id: int) -> discord.Message | None:
             if message.author == bot.user:
                 if "Poll ID: " in message.content:
                     if poll_id == get_poll_id_from_message(message.content):
+                        logging.debug(
+                            f"Found message for Poll ID {poll_id}: \
+{message.content}"
+                        )
                         return message
     return None
 
 
 @bot.event
 async def on_ready() -> None:
-    print(f"Logged in as {bot.user}!")
+    logging.info(f"Logged in as {bot.user}!")
     try:
         await connect_db()
-        print("Connected to database successfully.")
+        logging.info("Connected to database successfully.")
     except Exception as e:
-        print(f"Failed to connect to database: {e}")
+        logging.error(f"Failed to connect to database: {e}")
     try:
         await bot.tree.sync()
-        print("Slash commands synced successfully.")
+        logging.info("Slash commands synced successfully.")
     except Exception as e:
-        print(f"Failed to sync slash commands: {e}")
+        logging.error(f"Failed to sync slash commands: {e}")
 
     await load_previous_polls(bot)
-    print("Loaded previous polls successfully.")
+    logging.info("Loaded previous polls successfully.")
 
 
 @bot.tree.command(name="createpoll")  # type: ignore
@@ -91,12 +122,35 @@ async def create_poll(
     await interaction.response.defer()
 
     discord_server_id = get_server_id(interaction)
-    poll_id = await add_poll(question, options_list, discord_server_id)
-    view = PollView(poll_id, interaction.user.id)
-    await view.init_poll_view()  # Ensure initialization completes
-    await interaction.followup.send(
-        f"**{question}** Poll ID: {poll_id}", view=view
-    )
+    try:
+        poll_id = await add_poll(question, options_list, discord_server_id)
+        if poll_id is None:
+            logging.error("Failed to create poll")
+            raise ValueError("Failed to create poll")
+        view = PollView(poll_id, interaction.user.id)
+        await view.init_poll_view()  # Ensure initialization completes
+        await interaction.followup.send(
+            f"**{question}** Poll ID: {poll_id}", view=view
+        )
+    except discord.Forbidden:
+        if interaction.guild:
+            logging.error(
+                f"Permission error while creating poll in guild \
+{interaction.guild.name}"
+            )
+        await interaction.followup.send(
+            "I don't have permission to create a poll in this channel.",
+            ephemeral=True,
+        )
+    except Exception as e:
+        if interaction.guild:
+            logging.error(
+                f"Error creating poll in guild {interaction.guild.name}: {e}"
+            )
+        await interaction.followup.send(
+            "An error occurred while creating the poll.",
+            ephemeral=True,
+        )
 
 
 @bot.tree.command(name="deletepoll")  # type: ignore
@@ -114,9 +168,34 @@ async def delete_poll(
 
     message = await get_message_from_poll_id(poll_id)
 
-    modal = ConfirmDeleteModal(poll_id, message)  # type: ignore
+    if message is None:
+        await interaction.response.send_message(
+            "Poll not found or already deleted.", ephemeral=True
+        )
+        return
 
-    await interaction.response.send_modal(modal)
+    try:
+        modal = ConfirmDeleteModal(poll_id, message)  # type: ignore
+        await interaction.response.send_modal(modal)
+    except discord.Forbidden:
+        if interaction.guild:
+            logging.error(
+                f"Permission error while deleting poll in guild \
+{interaction.guild.name}"
+            )
+        await interaction.followup.send(
+            "I don't have permission to delete this poll.",
+            ephemeral=True,
+        )
+    except Exception as e:
+        if interaction.guild:
+            logging.error(
+                f"Error deleting poll in guild {interaction.guild.name}: {e}"
+            )
+        await interaction.followup.send(
+            "An error occurred while deleting the poll.",
+            ephemeral=True,
+        )
 
 
 # Error handling
@@ -125,6 +204,7 @@ async def on_command_error(ctx, error) -> None:  # type: ignore
     if isinstance(error, commands.CommandNotFound):
         return  # Ignore commands that are not found
     else:
+        logging.error(f"An error occurred: {error}")
         raise error  # other errors to be handled by the default handler
 
 

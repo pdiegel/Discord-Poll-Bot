@@ -4,6 +4,7 @@ from helpers.db_funcs import get_poll, record_vote
 from views.delete import ConfirmDeleteModal
 from typing import Any, Awaitable, Callable
 import asyncio
+import logging
 
 
 class PollView(View):
@@ -61,14 +62,19 @@ class PollView(View):
                     content=self.format_poll(),
                     view=self,
                 )
+                logging.info(
+                    f"Vote recorded for poll {self.poll_id} by user {user_id}"
+                )
             except discord.errors.NotFound:
-                print(f"Interaction {interaction.id} is no longer valid.")
+                logging.warning(
+                    f"Interaction {interaction.id} is no longer valid."
+                )
                 await interaction.followup.send(
                     "Sorry, this interaction is no longer valid.",
                     ephemeral=True,
                 )
             except Exception as e:
-                print(f"An error occurred: {e}")
+                logging.error(f"An error occurred: {e}")
                 await interaction.followup.send(
                     "An error occurred while processing your vote.",
                     ephemeral=True,
@@ -87,12 +93,12 @@ class PollView(View):
         try:
             await interaction.response.send_modal(modal)
         except discord.errors.NotFound:
-            print(f"Interaction {interaction.id} is no longer valid.")
+            logging.error(f"Interaction {interaction.id} is no longer valid.")
             await interaction.followup.send(
                 "Sorry, this interaction is no longer valid.", ephemeral=True
             )
         except Exception as e:
-            print(f"An error occurred: {e}")
+            logging.error(f"An error occurred: {e}")
             await interaction.followup.send(
                 "An error occurred while processing your request.",
                 ephemeral=True,
